@@ -9,7 +9,7 @@ namespace Sloth {
 		enum {rook, bishop};
 
 		// Encoded pieces
-		enum Pieces : int {P, N, B, R, Q, K, p, n, b, r, q, k};
+		enum Pieces : int {P, N, B, R, Q, K, p, n, b, r, q, k,emptyPiece};
 
 		int charToPiece(char pieceChar);
 	}

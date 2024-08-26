@@ -251,7 +251,7 @@ namespace Sloth {
     }
     
     // everything self explanatory
-    inline U64 Magic::getBishopAttacks(int square, U64 occupancy) {
+     U64 Magic::getBishopAttacks(int square, U64 occupancy) {
         occupancy &= bishopMasks[square];
         occupancy *= bishopMagics[square];
         occupancy >>= 64 - BISHOP_RELEVANT_BITS[square];
@@ -259,7 +259,7 @@ namespace Sloth {
         return bishopAttacks[square][occupancy];
     }
 
-    inline U64 Magic::getRookAttacks(int square, U64 occupancy) {
+     U64 Magic::getRookAttacks(int square, U64 occupancy) {
         occupancy &= rookMasks[square];
         occupancy *= rookMagics[square];
         occupancy >>= 64 - ROOK_RELEVANT_BITS[square];
@@ -267,7 +267,7 @@ namespace Sloth {
         return rookAttacks[square][occupancy];
     }
 
-    inline U64 Magic::getQueenAttacks(int square, U64 occupancy) {
+     U64 Magic::getQueenAttacks(int square, U64 occupancy) {
         U64 bishopAttacks = getBishopAttacks(square, occupancy);
         U64 rookAttacks = getRookAttacks(square, occupancy);
 

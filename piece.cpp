@@ -15,7 +15,7 @@ namespace Sloth {
             case 'r': return Pieces::r;
             case 'q': return Pieces::q;
             case 'k': return Pieces::k;
-            //default:  return Pieces::emptyPiece;
+            default:  return Pieces::emptyPiece; // Ensure a valid return for unrecognized characters
         }
 	}
 }

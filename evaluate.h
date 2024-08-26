@@ -19,8 +19,8 @@ namespace Sloth {
         U64 setFileRankMask(int fileNum, int rankNum);
         void initEvalMasks();
 
-        extern inline bool isEndgame();
-        extern inline int evaluate(Position& pos);
+        extern  bool isEndgame();
+        extern  int evaluate(Position& pos);
     }
 }
 

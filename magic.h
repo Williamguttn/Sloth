@@ -183,9 +183,9 @@ namespace Sloth {
 
         void initSlidersAttacks(int bishop);
 
-        extern inline U64 getBishopAttacks(int square, U64 occupancy);
-        extern inline U64 getRookAttacks(int square, U64 occupancy);
-        extern inline U64 getQueenAttacks(int square, U64 occupancy);
+        extern  U64 getBishopAttacks(int square, U64 occupancy);
+        extern  U64 getRookAttacks(int square, U64 occupancy);
+        extern  U64 getQueenAttacks(int square, U64 occupancy);
 
         void initAttacks();
 

@@ -247,7 +247,8 @@ namespace Sloth {
 		else {
 			// capture
 			if (getMoveCapture(move)) {
-				makeMove(pos, move, MoveType::allMoves);
+				return makeMove(pos, move, MoveType::allMoves);   // added return - fixes crash/bad performance in GCC & Clang - JA
+				
 			}
 			else
 				return 0; // dont make the move

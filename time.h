@@ -4,6 +4,21 @@
 
 #ifndef TIME_H_INCLUDED
 #define TIME_H_INCLUDED
+
+
+#include <iostream>
+#include <chrono>
+
+static unsigned long long getTickCount() {
+    return static_cast<unsigned long long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+}
+
+
+
 namespace Sloth {
 	class Time {
 	public:

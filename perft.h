@@ -1,22 +1,30 @@
-#ifndef PERFT_H
-#define PERFT_H_INCLUDED
+
+#pragma once
 
 #include "position.h"
-#include <windows.h>
+
+
+
+
+
+#include <time.h>
+#include <stdint.h>
+
+
+
 
 
 namespace Sloth {
 	namespace Perft {
 		static int getTimeMs() {
-			return GetTickCount();
+			return getTickCount();
 		}
 
 		extern long nodes;
 
-		extern inline void perft(int depth, Position& pos);
+		extern  void perft(int depth, Position& pos);
 
 		void perftTest(int depth, Position& pos);
 	}
 }
 
-#endif // !PERFT_H

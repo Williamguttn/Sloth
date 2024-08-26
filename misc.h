@@ -9,11 +9,11 @@
 #endif
 
 #if defined (__GNUC__)
-#   define INLINE  __inline __attribute__((always_inline))
+#   define   __ __attribute__((always_))
 #elif defined (_WIN32)
-#   define INLINE  __forceinline
+#   define   __force
 #else
-#   define INLINE  __inline
+#   define   __
 #endif
 
 #ifdef _WIN32
@@ -36,13 +36,13 @@ size_t file_size(FD fd);
 const void* map_file(FD fd, map_t* map);
 void unmap_file(const void* data, map_t map);
 
-INLINE uint32_t readu_le_u32(const void* p)
+ uint32_t readu_le_u32(const void* p)
 {
 	const uint8_t* q = (const uint8_t*)p;
 	return q[0] | (q[1] << 8) | (q[2] << 16) | (q[3] << 24);
 }
 
-INLINE uint16_t readu_le_u16(const void* p)
+ uint16_t readu_le_u16(const void* p)
 {
 	const uint8_t* q = (const uint8_t*)p;
 	return q[0] | (q[1] << 8);

@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
         pos.printBoard();
     } else UCI::loop();
 
-    free(Search::hashTable);
+    my_free(Search::hashTable);
 
     return 0;
 }

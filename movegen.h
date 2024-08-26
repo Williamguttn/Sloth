@@ -49,19 +49,19 @@ namespace Sloth {
             int count;
         } MoveList;
 
-        static inline void addMove(MoveList* moveList, int move) {
+        static  void addMove(MoveList* moveList, int move) {
             moveList->moves[moveList->count] = move;
             moveList->count++;
         }
 
         extern std::unordered_map<Piece::Pieces, char> promotedPieces;
 
-        extern inline void printMove(int move);
-        extern inline std::string moveToString(int move);
-        extern inline void printMoveList(MoveList* moveList);
+        extern  void printMove(int move);
+        extern  std::string moveToString(int move);
+        extern  void printMoveList(MoveList* moveList);
 
-		//extern inline void generateMoves(Position &pos, MoveList* moveCount);
-        extern inline void generateMoves(Position& pos, MoveList* moveList, bool captures);
+		//extern  void generateMoves(Position &pos, MoveList* moveCount);
+        extern  void generateMoves(Position& pos, MoveList* moveList, bool captures);
 	}
 }
 

@@ -41,11 +41,11 @@ namespace Sloth {
 
 		void initLeaperAttacks();
 
-		extern inline int countBits(U64 bitboard); // counts every bit available on a bitboard
+		extern  int countBits(U64 bitboard); // counts every bit available on a bitboard
 
 		// get least significant 1st bit index
-		extern inline int getLs1bIndex(U64 bitboard);
-		extern inline int msb(U64 bb);
+		extern int getLs1bIndex(U64 bitboard);
+		extern int msb(U64 bb);
 	}
 }
 

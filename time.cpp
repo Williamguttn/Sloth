@@ -1,29 +1,44 @@
-/*
-	Thanks to VICE by Bluefever Software
-*/
+
 #include <iostream>
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstdarg>
 #include <cstring>
-#include <stdlib.h>
+
+
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <sys/types.h>
+#endif 
 
-#include "time.h"
 
-namespace Sloth {
+
+
 	int Time::getTimeMs() {
-		return GetTickCount64();
+	#ifdef _WIN32
+		return GetTickCount();
+	#else
+		struct timeval tv;                             // for GCC/Clang - JA
+		gettimeofday(&tv, NULL);
+		return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+	#endif
 	}
 
 	int Time::inputWaiting() {
-		#ifndef WIN32
-			fd_set readfds;
-			struct timeval_tv;
-			FD_ZERO(&readfds);
-			FD_SET(fileno(stdin), &readfds);
-			tv.tv_sec = 0;
-			tv.tv_usec = 0;
-			select(16, &readfds, 0, 0, &tv);
-		#else
+	#ifndef _WIN32                                    // for GCC/Clang - JA
+		fd_set readfds;
+		FD_ZERO(&readfds);
+		FD_SET(fileno(stdin), &readfds);
+		struct timeval tv;
+		tv.tv_sec = 0; 
+		tv.tv_usec = 0;
+		select(fileno(stdin) + 1, &readfds, NULL, NULL, &tv);
+		return FD_ISSET(fileno(stdin), &readfds);
+	#else
 		static int init = 0, pipe;
 		static HANDLE inh;
 		DWORD dw;
@@ -41,36 +56,27 @@ namespace Sloth {
 		if (pipe) {
 			if (!PeekNamedPipe(inh, NULL, 0, NULL, &dw, NULL)) return 1;
 			return dw;
-		}
-		else {
+		} else {
 			GetNumberOfConsoleInputEvents(inh, &dw);
 			return dw <= 1 ? 0 : dw;
 		}
-		#endif
+	#endif
 	}
 
 	void Time::readInput() {
-		int bytes;
-
 		char input[256] = "";
 
 		if (inputWaiting()) {
 			stopped = true;
 
-			do {
-				std::cin.getline(input, 256);
-				bytes = std::cin.gcount();
-			} while (bytes < 0);
+			std::cin.getline(input, 256);
+			int bytes = std::cin.gcount();
 
 			if (bytes > 0) {
 				char* endc = strchr(input, '\n');
-
 				if (endc) *endc = 0;
 
-				if (std::strncmp(input, "quit", 4) == 0) {
-					quit = true;
-				}
-				else if (std::strncmp(input, "stop", 4) == 0) {
+				if (std::strncmp(input, "quit", 4) == 0 || std::strncmp(input, "stop", 4) == 0) {
 					quit = true;
 				}
 			}
@@ -84,4 +90,5 @@ namespace Sloth {
 
 		readInput();
 	}
-}
+
+
