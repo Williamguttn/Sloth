@@ -1,0 +1,8 @@
+all:
+	armv7a-linux-androideabi21-clang++ -o sloth ../src/glob.cpp -mthumb -march=armv7-a -mfloat-abi=softfp -mfpu=neon \
+	-lm -latomic -m32 -stdlib=libc++ -fPIE -static-libstdc++ -pie -std=c++20 -flto=full -Ofast -pipe -finline-functions \
+	-mpopcnt -pthread -fuse-ld=lld -w
+	
+	
+	 
+	
