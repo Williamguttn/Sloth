@@ -7,8 +7,7 @@ if /I "%1"=="SSE4" goto sse4
 if /I "%1"=="BMI2" goto bmi2
 if /I "%1"=="AVX2" goto avx2
 if /I "%1"=="AVX512" goto avx512
-if /I "%1"=="ARM" goto arm
-echo Invalid argument. Use SSE3, SSE4, BMI2, AVX2, AVX512, ARM, or no argument for all.
+echo Invalid argument. Use SSE3, SSE4, BMI2, AVX2, AVX512, or no argument for all.
 goto end
 
 :sse3
@@ -36,18 +35,12 @@ if exist "sloth_avx512.exe" del "sloth_avx512.exe"
 call :build_avx512
 goto end
 
-:arm
-if exist "sloth_arm.exe" del "sloth_arm.exe"
-call :build_arm
-goto end
-
 :all
 call :build_sse3
 call :build_sse4
 call :build_bmi2
 call :build_avx2
 call :build_avx512
-call :build_arm
 goto end
 
 :build_sse3
