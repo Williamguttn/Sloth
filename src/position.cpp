@@ -45,7 +45,7 @@ namespace Sloth {
 		U64 bb;
 
 		for (int piece = Piece::P; piece <= Piece::k; piece++) {
-			bb = Bitboards::bitboards[piece];
+			bb = pos.bitboards[piece];
 
 			while (bb) {
 				int sq = Bitboards::getLs1bIndex(bb);
@@ -81,8 +81,8 @@ namespace Sloth {
 			int enPassantFlag = getMoveEnpassant(move);
 			int castlingFlag = getMoveCastling(move);
 
-			popBit(Bitboards::bitboards[piece], sourceSquare); // pop bit from sourcesquare
-			setBit(Bitboards::bitboards[piece], targetSquare); // set bit on targetsquare
+			popBit(pos.bitboards[piece], sourceSquare); // pop bit from sourcesquare
+			setBit(pos.bitboards[piece], targetSquare); // set bit on targetsquare
 
 			// hash the piece (move the piece in hash)
 			hashKey ^= Zobrist::pieceKeys[piece][sourceSquare];
@@ -94,7 +94,9 @@ namespace Sloth {
 				pos.fifty = 0;
 			}
 
-			if (captureFlag) { // if move is capturing something
+			int capturedPieceType = -1;
+
+			if (captureFlag) {
 				int startPiece, endPiece;
 
 				startPiece = (pos.sideToMove == Colors::white) ? Piece::p : Piece::P;
@@ -104,12 +106,12 @@ namespace Sloth {
 
 				// loop over bb opposite to current side to move
 				for (int bbPiece = startPiece; bbPiece <= endPiece; bbPiece++) {
-					if (getBit(Bitboards::bitboards[bbPiece], targetSquare)) { // if piece on target square, then remove from corresponding bitboard
-						popBit(Bitboards::bitboards[bbPiece], targetSquare);
+					if (getBit(pos.bitboards[bbPiece], targetSquare)) { // if piece on target square, then remove from corresponding bitboard
+						popBit(pos.bitboards[bbPiece], targetSquare);
 
 						// remove the piece from hash
 						hashKey ^= Zobrist::pieceKeys[bbPiece][targetSquare];
-
+						capturedPieceType = bbPiece;
 						break;
 					}
 				}
@@ -117,11 +119,11 @@ namespace Sloth {
 
 			// pawn promotions
 			if (promotedPiece) {
-				popBit(Bitboards::bitboards[(pos.sideToMove == Colors::white) ? Piece::P : Piece::p], targetSquare);// remove pawn from target square
+				popBit(pos.bitboards[(pos.sideToMove == Colors::white) ? Piece::P : Piece::p], targetSquare);// remove pawn from target square
 
 				hashKey ^= Zobrist::pieceKeys[(pos.sideToMove == Colors::white) ? Piece::P : Piece::p][targetSquare]; // remove from hash key
 
-				setBit(Bitboards::bitboards[promotedPiece], targetSquare); // set up the promoted piece
+				setBit(pos.bitboards[promotedPiece], targetSquare); // set up the promoted piece
 
 				hashKey ^= Zobrist::pieceKeys[promotedPiece][targetSquare]; // adding promoted to hash key
 			}
@@ -129,12 +131,12 @@ namespace Sloth {
 			if (enPassantFlag) {
 
 				if (pos.sideToMove == Colors::white) {
-					popBit(Bitboards::bitboards[Piece::p], targetSquare + 8);
+					popBit(pos.bitboards[Piece::p], targetSquare + 8);
 
 					hashKey ^= Zobrist::pieceKeys[Piece::p][targetSquare + 8]; // remove from hash key
 				}
 				else {
-					popBit(Bitboards::bitboards[Piece::P], targetSquare - 8);
+					popBit(pos.bitboards[Piece::P], targetSquare - 8);
 
 					hashKey ^= Zobrist::pieceKeys[Piece::P][targetSquare - 8];
 				}
@@ -164,29 +166,29 @@ namespace Sloth {
 				switch (targetSquare)
 				{
 				case (g1): // king side
-					popBit(Bitboards::bitboards[Piece::R], h1); // remove rook from h1
-					setBit(Bitboards::bitboards[Piece::R], f1); // set it to f1
+					popBit(pos.bitboards[Piece::R], h1); // remove rook from h1
+					setBit(pos.bitboards[Piece::R], f1); // set it to f1
 
 					hashKey ^= Zobrist::pieceKeys[Piece::R][h1]; // hashing the rook
 					hashKey ^= Zobrist::pieceKeys[Piece::R][f1];
 					break;
 				case (c1):
-					popBit(Bitboards::bitboards[Piece::R], a1);
-					setBit(Bitboards::bitboards[Piece::R], d1);
+					popBit(pos.bitboards[Piece::R], a1);
+					setBit(pos.bitboards[Piece::R], d1);
 
 					hashKey ^= Zobrist::pieceKeys[Piece::R][a1];
 					hashKey ^= Zobrist::pieceKeys[Piece::R][d1];
 					break;
 				case (g8): // black
-					popBit(Bitboards::bitboards[Piece::r], h8);
-					setBit(Bitboards::bitboards[Piece::r], f8);
+					popBit(pos.bitboards[Piece::r], h8);
+					setBit(pos.bitboards[Piece::r], f8);
 
 					hashKey ^= Zobrist::pieceKeys[Piece::r][h8];
 					hashKey ^= Zobrist::pieceKeys[Piece::r][f8];
 					break;
 				case (c8):
-					popBit(Bitboards::bitboards[Piece::r], a8);
-					setBit(Bitboards::bitboards[Piece::r], d8);
+					popBit(pos.bitboards[Piece::r], a8);
+					setBit(pos.bitboards[Piece::r], d8);
 
 					hashKey ^= Zobrist::pieceKeys[Piece::r][a8];
 					hashKey ^= Zobrist::pieceKeys[Piece::r][d8];
@@ -205,31 +207,60 @@ namespace Sloth {
 			hashKey ^= Zobrist::castlingKeys[pos.castle];
 
 			// update occupancies
-			memset(Bitboards::occupancies, 0ULL, 24);
+			memset(pos.occupancies, 0ULL, 24);
 
 			for (int bPiece = Piece::P; bPiece <= Piece::K; bPiece++) {
-				Bitboards::occupancies[Colors::white] |= Bitboards::bitboards[bPiece];
+				pos.occupancies[Colors::white] |= pos.bitboards[bPiece];
 			}
 
 			for (int bPiece = Piece::p; bPiece <= Piece::k; bPiece++) {
-				Bitboards::occupancies[Colors::black] |= Bitboards::bitboards[bPiece];
+				pos.occupancies[Colors::black] |= pos.bitboards[bPiece];
 			}
 
-			Bitboards::occupancies[Colors::both] |= Bitboards::occupancies[Colors::white];
-			Bitboards::occupancies[Colors::both] |= Bitboards::occupancies[Colors::black];
+			pos.occupancies[Colors::both] |= pos.occupancies[Colors::white];
+			pos.occupancies[Colors::both] |= pos.occupancies[Colors::black];
+
+			if (castlingFlag || promotedPiece || enPassantFlag) {
+				// full rebuild with converted squares
+				nn_init_accumulator(pos.nnue_acc);
+				for (int piece = Piece::P; piece <= Piece::k; piece++) {
+					U64 pieces = pos.bitboards[piece];
+					int piece_type = piece % 6;  // 0-5 for NNUE
+					int color = (piece < 6) ? 0 : 1;  // 0 for white, 1 for black
+					while (pieces) {
+						int sq = Bitboards::getLs1bIndex(pieces);
+						int standard_sq = sq ^ 56;  // converting the a1=56 indexing to standard a1=0
+						nn_add_piece(pos.nnue_acc, piece_type, color, standard_sq);
+						popBit(pieces, sq);
+					}
+				}
+			}
+			else {
+
+				// Single-piece move
+				int colorIdx = (pos.sideToMove == Colors::white ? 0 : 1);
+				const int convPieceType[12] = {0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5};
+				int standard_source = sourceSquare ^ 56;
+				int standard_target = targetSquare ^ 56;
+				nn_mov_piece(pos.nnue_acc, convPieceType[piece], colorIdx, standard_source, standard_target);
+				if (captureFlag) {
+					int oppColor = colorIdx ^ 1;
+					int nnue_cap_type = capturedPieceType % 6;
+					nn_del_piece(pos.nnue_acc, nnue_cap_type, oppColor, standard_target);
+				}
+			}
 
 			pos.sideToMove ^= 1;
-
 			hashKey ^= Zobrist::sideKey;
 
 			// make sure that king hasnt been exposed into a check
-			if (isSquareAttacked((pos.sideToMove == Colors::white) ? Bitboards::getLs1bIndex(Bitboards::bitboards[Piece::k]) : Bitboards::getLs1bIndex(Bitboards::bitboards[Piece::K]), pos.sideToMove)) {
+			if (isSquareAttacked((pos.sideToMove == Colors::white) ? Bitboards::getLs1bIndex(pos.bitboards[Piece::k]) : Bitboards::getLs1bIndex(pos.bitboards[Piece::K]), pos.sideToMove)) {
 				takeBack(pos);
 
 				return 0;
 			}
-			else
-				return 1;
+
+			return 1;
 		}
 		else {
 			// capture
@@ -242,9 +273,9 @@ namespace Sloth {
 		}
 	}
 
-	Position Position::parseFen(const char* fen) { // Will technically load the position
-		memset(Bitboards::bitboards, 0ULL, sizeof(Bitboards::bitboards)); // reset board position and state variables
-		memset(Bitboards::occupancies, 0ULL, sizeof(Bitboards::occupancies));
+	Position Position::parseFen(const char* fen) {
+		memset(bitboards, 0ULL, sizeof(bitboards)); // reset board position and state variables
+		memset(occupancies, 0ULL, sizeof(occupancies));
 
 		sideToMove = 0;
 		enPassant = no_sq;
@@ -254,12 +285,8 @@ namespace Sloth {
 
 		fifty = 0;
 
-		Search::repetitionIndex = 0;
-		memset(Search::repetitionTable, 0ULL, sizeof(Search::repetitionTable));
-
-		//printf("\nply: %d\n", Search::ply);
-
-		Search::ply = 0;
+		repetitionIndex = 0;
+		memset(repetitionTable, 0ULL, sizeof(repetitionTable));
 
 		for (int r = 0; r < 8; r++) {
 			for (int f = 0; f < 8; f++) {
@@ -268,7 +295,7 @@ namespace Sloth {
 				if ((*fen >= 'a' && *fen <= 'z') || (*fen >= 'A' && *fen <= 'Z')) {
 					int piece = Piece::charToPiece(*fen);
 
-					setBit(Bitboards::bitboards[piece], sq);
+					setBit(bitboards[piece], sq);
 
 					fen++;
 				}
@@ -279,7 +306,7 @@ namespace Sloth {
 					int piece = -1;
 
 					for (int bbPiece = Piece::P; bbPiece <= Piece::k; bbPiece++) {
-						if (getBit(Bitboards::bitboards[bbPiece], sq)) {
+						if (getBit(bitboards[bbPiece], sq)) {
 							piece = bbPiece;
 						}
 					}
@@ -335,17 +362,30 @@ namespace Sloth {
 
 		// white pieces bitboards
 		for (int piece = Piece::P; piece <= Piece::K; piece++) {
-			Bitboards::occupancies[white] |= Bitboards::bitboards[piece];
+			occupancies[white] |= bitboards[piece];
 		}
 
 		// black pieces bitboards
 		for (int piece = Piece::p; piece <= Piece::k; piece++) {
-			Bitboards::occupancies[black] |= Bitboards::bitboards[piece];
+			occupancies[black] |= bitboards[piece];
 		}
 
-		Bitboards::occupancies[both] = (Bitboards::occupancies[white] | Bitboards::occupancies[black]);
+		occupancies[both] = (occupancies[white] | occupancies[black]);
 
 		hashKey = Zobrist::generateHashKey(*this);
+
+		nn_init_accumulator(nnue_acc);
+		for (int piece = Piece::P; piece <= Piece::k; piece++) {
+			U64 pieces = bitboards[piece];
+			int piece_type = piece % 6;  // 0-5
+			int color = (piece < 6) ? 0 : 1;  // 0 for white, 1 for black
+			while (pieces) {
+				int sq = Bitboards::getLs1bIndex(pieces);
+				int standard_sq = sq ^ 56;
+				nn_add_piece(nnue_acc, piece_type, color, standard_sq);
+				popBit(pieces, sq);
+			}
+		}
 
 		return *this;
 	}
@@ -364,7 +404,7 @@ namespace Sloth {
 				int piece = -1;
 
 				for (int bbPiece = Piece::P; bbPiece <= Piece::k; bbPiece++) {
-					if (getBit(Bitboards::bitboards[bbPiece], sq)) { // if piece on current square
+					if (getBit(bitboards[bbPiece], sq)) { // if piece on current square
 						piece = bbPiece;
 					}
 				}
@@ -401,24 +441,24 @@ namespace Sloth {
 
 	inline int Position::isSquareAttacked(int square, int side) {
 		// attacked by white pawns
-		if ((side == Colors::white) && (Bitboards::pawnAttacks[Colors::black][square] & Bitboards::bitboards[Piece::P]))
+		if ((side == Colors::white) && (Bitboards::pawnAttacks[Colors::black][square] & bitboards[Piece::P]))
 			return 1;
 
-		if ((side == Colors::black) && (Bitboards::pawnAttacks[Colors::white][square] & Bitboards::bitboards[Piece::p]))
+		if ((side == Colors::black) && (Bitboards::pawnAttacks[Colors::white][square] & bitboards[Piece::p]))
 			return 1;
 
-		if (Bitboards::knightAttacks[square] & ((side == Colors::white) ? Bitboards::bitboards[Piece::N] : Bitboards::bitboards[Piece::n]))
+		if (Bitboards::knightAttacks[square] & ((side == Colors::white) ? bitboards[Piece::N] : bitboards[Piece::n]))
 			return 1;
 
-		if (Magic::getBishopAttacks(square, Bitboards::occupancies[Colors::both]) & ((side == Colors::white) ? Bitboards::bitboards[Piece::B] : Bitboards::bitboards[Piece::b])) return 1;
+		if (Magic::getBishopAttacks(square, occupancies[Colors::both]) & ((side == Colors::white) ? bitboards[Piece::B] : bitboards[Piece::b])) return 1;
 
-		if (Magic::getRookAttacks(square, Bitboards::occupancies[Colors::both]) & ((side == Colors::white) ? Bitboards::bitboards[Piece::R] : Bitboards::bitboards[Piece::r]))
+		if (Magic::getRookAttacks(square, occupancies[Colors::both]) & ((side == Colors::white) ? bitboards[Piece::R] : bitboards[Piece::r]))
 			return 1;
 
-		if (Magic::getQueenAttacks(square, Bitboards::occupancies[Colors::both]) & ((side == Colors::white) ? Bitboards::bitboards[Piece::Q] : Bitboards::bitboards[Piece::q]))
+		if (Magic::getQueenAttacks(square, occupancies[Colors::both]) & ((side == Colors::white) ? bitboards[Piece::Q] : bitboards[Piece::q]))
 			return 1;
 
-		if (Bitboards::kingAttacks[square] & ((side == Colors::white) ? Bitboards::bitboards[Piece::K] : Bitboards::bitboards[Piece::k]))
+		if (Bitboards::kingAttacks[square] & ((side == Colors::white) ? bitboards[Piece::K] : bitboards[Piece::k]))
 			return 1;
 
 		return 0;

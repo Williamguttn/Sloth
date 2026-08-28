@@ -5,38 +5,54 @@
 #include <string>
 #include <string.h>
 
+#include "nnue.h"
+
 #include "bitboards.h"
 #include "time.h"
 
 #include "types.h"
 
 namespace Sloth {
-	#define copyBoard(pos) \
-		U64 bbsCopy[12], occCopies[3]; \
-		int side, enPassant, castle, fifty; \
-		uint16_t pieceOnSqCopy[64]; \
-		memcpy(bbsCopy, Bitboards::bitboards, 96); \
-		memcpy(occCopies, Bitboards::occupancies, 24); \
-		side = pos.sideToMove, enPassant = pos.enPassant, castle = pos.castle; \
-		fifty = pos.fifty; \
-		U64 hashKeyCopy = pos.hashKey; \
-	
-	#define takeBack(pos) \
-		memcpy(Bitboards::bitboards, bbsCopy, 96); \
-		memcpy(Bitboards::occupancies, occCopies, 24); \
-		pos.sideToMove = side; pos.enPassant = enPassant; pos.castle = castle; \
-		pos.fifty = fifty; \
-		pos.hashKey = hashKeyCopy; \
+	#define copyBoard(pos)                                      \
+		U64  bbsCopy[12], occCopies[3];                         \
+		int  side, enPassant, castle, fifty;                    \
+		U64  hashKeyCopy = pos.hashKey;                         \
+		NN_Accumulator nnue_acc_copy;                           \
+		/* copy the accumulator out */                          \
+		memcpy(nnue_acc_copy, pos.nnue_acc, sizeof(nnue_acc_copy)); \
+		memcpy(bbsCopy,        pos.bitboards, 96);       \
+		memcpy(occCopies,      pos.occupancies, 24);     \
+		side       = pos.sideToMove;                            \
+		enPassant  = pos.enPassant;                             \
+		castle     = pos.castle;                                \
+		fifty      = pos.fifty;
+
+	#define takeBack(pos)                                        \
+		/* restore NNUE */                                       \
+		memcpy(pos.nnue_acc, nnue_acc_copy, sizeof(nnue_acc_copy)); \
+		memcpy(pos.bitboards, bbsCopy,   96);             \
+		memcpy(pos.occupancies, occCopies, 24);           \
+		pos.sideToMove = side;                                   \
+		pos.enPassant  = enPassant;                              \
+		pos.castle     = castle;                                 \
+		pos.fifty      = fifty;                                  \
+		pos.hashKey    = hashKeyCopy;
 
 	class Position {
 	public:
 		int sideToMove = -1;
 		int enPassant = no_sq; // en passant square
 		int castle;
-
+		bool debug = false;
 		int fifty = 0;
-
 		U64 hashKey = 0ULL;
+		NN_Accumulator nnue_acc;
+
+		U64 bitboards[12];
+		U64 occupancies[3];
+
+		U64 repetitionTable[1000];
+		int repetitionIndex = 0;
 
 		int makeMove(Position& pos, int move, int moveFlag);
 
@@ -58,7 +74,6 @@ namespace Sloth {
 	extern Position game; // this game is going to be the class for every chess game that the engine plays
 
 	namespace Zobrist {
-		//extern U64 pieceKeys[12][4];
 		extern U64 pieceKeys[12][64];
 		extern U64 enPassantKeys[64];
 		extern U64 castlingKeys[16];

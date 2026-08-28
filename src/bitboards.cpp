@@ -27,8 +27,8 @@ namespace Sloth {
 	U64 Bitboards::knightAttacks[64];
 	U64 Bitboards::kingAttacks[64];
 
-	U64 Bitboards::bitboards[12];
-	U64 Bitboards::occupancies[3];
+	//U64 Bitboards::bitboards[12];
+	//U64 Bitboards::occupancies[3];
 
 	void Bitboards::printBitboard(U64 bb, bool flip) {
 		if (flip) {

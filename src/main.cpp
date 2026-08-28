@@ -24,30 +24,62 @@
 #include "uci.h"
 #include "search.h"
 #include "evaluate.h"
+#include "nnue.h"
+#include "tune.h"
 
 using namespace Sloth;
-
 int main(int argc, char* argv[])
 {
+    if (argc > 1 && strcmp(argv[1], "spsa") == 0) {
+        Tune::printSPSAInput();
+        return 0;
+    }
+
     Magic::initAttacks();
     Bitboards::initLeaperAttacks();
     Zobrist::initRandomKeys();
     Search::initHashTable(64);
-    Eval::initEvalMasks();
 
-    bool debug = false;
+    const bool debug = false;
+
+    if (nn_load("eval.nnue") != 0) {
+        std::cout << "info string Failed to load NNUE file: eval.nnue\n";
+    }
+
+    if (argc > 1 && strcmp(argv[1], "bench") == 0) {
+        UCI::bench();
+        goto end;
+    }
 
     if (debug) {
         Position pos;
+        pos.debug = true;
 
         Movegen::MoveList movelist[1];
 
-        pos.parseFen("8/8/8/8/8/8/6K1/8 w - - 0 1");       
-        pos.printBoard();
-        Eval::evaluate(pos);
-    } else UCI::loop();
+        const char* testFens[] = {
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        };
 
-    my_free(Search::hashTable);
+        for (const char* fen : testFens) {
+            pos.parseFen(fen);
+            pos.printBoard();
+
+            int score = Eval::evaluate(pos);
+
+            std::cout << "eval: " << score << std::endl;
+        }
+
+        #ifdef _WIN32
+            system("pause");
+        #else
+           system("read -p 'Press Enter to continue...' var");
+        #endif
+    } else UCI::loop();
+end:
+    free(Search::hashTable);
 
     return 0;
 }

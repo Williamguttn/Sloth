@@ -42,14 +42,13 @@
 #define getMoveCastling(move) (move & 0x800000)
 
 namespace Sloth {
-	namespace Movegen {
-        // MIGHT MOVE MOVELIST
+    namespace Movegen {
         typedef struct {
             int moves[256];
             int count;
         } MoveList;
 
-        static  void addMove(MoveList* moveList, int move) {
+        static void addMove(MoveList* moveList, int move) {
             moveList->moves[moveList->count] = move;
             moveList->count++;
         }
@@ -60,7 +59,6 @@ namespace Sloth {
         extern  std::string moveToString(int move);
         extern  void printMoveList(MoveList* moveList);
 
-		//extern  void generateMoves(Position &pos, MoveList* moveCount);
         extern  void generateMoves(Position& pos, MoveList* moveList, bool captures);
 	}
 }

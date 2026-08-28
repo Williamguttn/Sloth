@@ -6,6 +6,7 @@
 #include "position.h"
 #include "types.h"
 #include "movegen.h"
+#include "threads.h"
 
 
 #undef ASSERT
@@ -51,37 +52,19 @@ static void * my_malloc(int size) {
 
 namespace Sloth {
 
-    namespace Search {
+   namespace Search {
 
-        struct SearchStack {
-            int ply;
-            int staticEval;
-        };
+      extern HashEntry *hashTable;
+      extern int hashEntries;
+      extern int bestMove;
+      extern int contempt;
 
-        extern int hashEntries;
+      void clearHashTable();
+      void initHashTable(int mb);
+      void printMoveScores(Movegen::MoveList* moveList, Position& pos, Threads::ThreadData* threadData);
 
-        extern HASHE *hashTable;
-
-        extern U64 repetitionTable[1000];
-        extern int repetitionIndex;
-
-        extern int ply;
-
-        extern int bestMove;
-
-        extern int contempt;
-
-        void clearHashTable();
-        void initHashTable(int mb);
-
-        void printMoveScores(Movegen::MoveList* moveList, Position& pos);
-
-        extern  int scoreMove(int move, Position& pos);
-        extern  void sortMoves(Movegen::MoveList* moveList, int bestMove, Position& pos);
-
-        extern  int negamax(int alpha, int beta, int depth, bool cutnode, Position& pos);
-
-        void search(Position& pos, int depth, bool ponder);
-    }
+      extern  int negamax(int alpha, int beta, int depth, bool cutnode, Position& pos, Threads::ThreadData* threadData);
+      extern void iterativeDeepen(Threads::ThreadData* threadData);
+   }
 }
 #endif

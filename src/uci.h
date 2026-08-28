@@ -4,7 +4,6 @@
 #include "position.h"
 //#include "threads.h"
 #include "types.h"
-//#include "search2.h"
 
 namespace Sloth {
 	namespace UCI {
@@ -13,6 +12,7 @@ namespace Sloth {
 		void parsePosition(Position& pos, const char* command);
 		void parseGo(Position& pos, const char* command);
 
+		void bench();
 		void loop();
 	}
 }

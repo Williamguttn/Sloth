@@ -27,8 +27,8 @@ namespace Sloth {
 		extern U64 kingAttacks[64];
 
 		// 12 bitboards, each piece and each color
-		extern U64 bitboards[12];
-		extern U64 occupancies[3]; // This will hold every piece on one bitboard. One for every white piece combined, one for black combined and one with every piece of both color on the bitboard
+		//extern U64 bitboards[12];
+		//extern U64 occupancies[3]; // This will hold every piece on one bitboard. One for every white piece combined, one for black combined and one with every piece of both color on the bitboard
 
 		void printBitboard(U64 bb, bool flip);
 

@@ -11,8 +11,8 @@ namespace Sloth {
 			return getTickCount();
 		}
 
-		extern long nodes;
-		extern  void perft(int depth, Position& pos);
+		extern uint64_t nodes;
+		extern void perft(int depth, Position& pos);
 		void perftTest(int depth, Position& pos);
 	}
 }
