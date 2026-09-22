@@ -768,11 +768,6 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 			}
 		}
 
-
-		// TODO: consider
-		if (depth >= IirMinDepth && !ttHit && !(!(pvNode || cutnode)))
-			depth--;
-
 		// ProbCut
 		int probCutBeta = beta + ProbCutMargin;
 

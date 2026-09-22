@@ -19,14 +19,15 @@ Sloth is a beginner project, and can therefore not be compared/matched against p
 
 # Rating
 
-Sloth has not received a CCRL rating yet, however, it does play online every once in a while. You can check out its Lichess account here:
+On the complete CCRL 40/15 rating list, Sloth currently sits at 3014 `±` 129. Since it was added recently, it only has 13 games, and therefore has substantial uncertainty.
 
+Sloth also plays online every once in a while on Lichess:
 [SlothComputer on Lichess](https://lichess.org/@/SlothComputer)
   
 
 # Build Instructions
 
-Clang++ is recommended. For windows, you can run the ```build_windows.bat``` file found in ```/build```. For Linux, there is a ```Makefile``` in the root of the project.
+Clang++ or g++ is recommended. For windows, you can run the ```build_windows.bat``` file found in ```/build```. For Linux, there is a ```Makefile``` in the root of the project.
 
 To compile with the NNUE embedded, add `EVALFILE=/path/to/eval.nnue`
 

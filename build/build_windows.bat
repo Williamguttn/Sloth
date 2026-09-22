@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-set CXX=clang++
+set CXX=g++
 set PY=python
 
 set ARCH_ARG=
@@ -88,10 +88,10 @@ if not "%EVALFILE%"=="" (
 %CXX% -o sloth ../src/glob.cpp ^
     -Ofast -flto -ftree-vectorize -funroll-loops -w ^
     -static -DNDEBUG -finline-functions -pipe -std=c++23 -ffast-math ^
-    -fno-rtti -fstrict-aliasing -fomit-frame-pointer -fuse-ld=lld ^
+    -fno-rtti -fstrict-aliasing -fomit-frame-pointer ^
     %ARCH_FLAGS% %EXTRA_FLAGS%
 
-rename sloth sloth_%~1.exe
+rename sloth.exe sloth_%~1.exe
 goto :eof
 
 :end
