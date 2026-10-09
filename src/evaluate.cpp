@@ -10,6 +10,7 @@
 
 namespace Sloth {
 	inline int Eval::evaluate(Position& pos) {
-		return nn_evaluate(pos.nnue_acc, pos.sideToMove);
+		int pieceCount = Bitboards::countBits(pos.occupancies[both]);
+		return nn_evaluate(pos.nnue_acc, pos.sideToMove, pieceCount);
 	}
 }

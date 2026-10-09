@@ -21,16 +21,16 @@ namespace Sloth {
             std::atomic<bool>* stop;
             Position pos;  // Each thread gets its own copy
             int score;
+            int rootSide; // side to move at the root, contempt is applied from its perspective
             int ply;
             int maxPly;
             int depth;
             U64 nodes;
-            double agingFactor;
             
             bool followPV;
             bool scorePV;
 
-            SearchStack ss[MAX_PLY];
+            SearchStack ss[MAX_PLY + 1]; // +1, negamax is entered at ply MAX_PLY before its ply guard
 
             int pvLength[MAX_PLY];
             int pvTable[MAX_PLY][MAX_PLY];

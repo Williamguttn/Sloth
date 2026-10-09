@@ -47,20 +47,20 @@ static void * my_malloc(int size) {
    return address;
 }
 
-
-
-
 namespace Sloth {
 
    namespace Search {
 
-      extern HashEntry *hashTable;
-      extern int hashEntries;
+      extern HashBucket *hashTable;
+      extern size_t hashBuckets;
+      extern uint8_t hashGeneration;
       extern int bestMove;
       extern int contempt;
 
       void clearHashTable();
       void initHashTable(int mb);
+      void freeHashTable();
+      void newSearchGeneration();
       void printMoveScores(Movegen::MoveList* moveList, Position& pos, Threads::ThreadData* threadData);
 
       extern  int negamax(int alpha, int beta, int depth, bool cutnode, Position& pos, Threads::ThreadData* threadData);

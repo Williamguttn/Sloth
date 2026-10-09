@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#include <climits>
+#include <new>
 
 #include "search.h"
 #include "evaluate.h"
@@ -20,41 +22,43 @@ namespace Sloth {
 	int scoreMove(int move, Position& pos, Threads::ThreadData *threadData);
 	static int continuationHistoryScore(int piece, int target, Threads::ThreadData* td);
 
-	int Search::hashEntries = 0;
-	HashEntry* Search::hashTable = NULL;
+	size_t Search::hashBuckets = 0;
+	HashBucket* Search::hashTable = NULL;
+	uint8_t Search::hashGeneration = 0; // bumped once per search, wraps at 256
 
 	int Search::contempt = 0;
-	
-	int totalEntries = 0;
-	int usedEntries = 0;
+
 	int lastCurrmoveOutput = 0;
 	bool reportedCurrMove = false;
 	const int CURRMOVE_INITIAL_DELAY = 2500;
 	const int CURRMOVE_INTERVAL = 0;
+	constexpr int HISTORY_MAX = 16384; // bound of each history table entry
 	const int pieceValues[13] = { 100, 300, 300, 500, 900, VALUE_INFINITE, 100, 300, 300, 500, 900, VALUE_INFINITE, 0 };
 
 	void Search::clearHashTable() {
-		//if (game.time.ponder) return;
-
-		HashEntry* hashEntry;
-		totalEntries = hashEntries;
-		usedEntries = 0;
-
-		for (hashEntry = hashTable; hashEntry < hashTable + hashEntries; hashEntry++) {
-			hashEntry->keyXorData.store(0, std::memory_order_relaxed);
-			hashEntry->data.store(0, std::memory_order_relaxed);
+		for (size_t b = 0; b < hashBuckets; b++) {
+			for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+				hashTable[b].entries[i].keyXorData.store(0, std::memory_order_relaxed);
+				hashTable[b].entries[i].data.store(0, std::memory_order_relaxed);
+			}
 		}
 	}
 
-	// Packs bestMove[0..23] | depth[24..30] | flag[31..32] | score[33..63] into HASHE::data
-	static inline uint64_t packHashData(int bestMove, int depth, int flag, int score) {
+	void Search::newSearchGeneration() {
+		hashGeneration++;
+	}
+
+	// Packs bestMove[0..23] | depth[24..30] | flag[31..32] | score[33..55] | generation[56..63] into HASHE::data
+	static inline uint64_t packHashData(int bestMove, int depth, int flag, int score, uint8_t generation) {
 		// ProbCut can pass a negative depth, and the depth field is unsigned
 		if (depth < 0) depth = 0;
+		if (depth > 0x7F) depth = 0x7F; // 7-bit field, don't let a check-extended root depth wrap to 0
 		uint64_t data = 0;
 		data |= (uint64_t)((uint32_t)bestMove & 0xFFFFFFu);
 		data |= (uint64_t)((uint32_t)depth & 0x7Fu) << 24;
 		data |= (uint64_t)((uint32_t)flag & 0x3u) << 31;
-		data |= (uint64_t)((uint32_t)score & 0x7FFFFFFFu) << 33;
+		data |= (uint64_t)((uint32_t)score & 0x7FFFFFu) << 33;
+		data |= (uint64_t)generation << 56;
 		return data;
 	}
 
@@ -62,107 +66,176 @@ namespace Sloth {
 		*bestMove = (int)(data & 0xFFFFFFu);
 		*depth = (int)((data >> 24) & 0x7Fu);
 		*flag = (int)((data >> 31) & 0x3u);
-		uint32_t rawScore = (uint32_t)((data >> 33) & 0x7FFFFFFFu);
-		if (rawScore & 0x40000000u) rawScore |= 0x80000000u; // sign-extend 31-bit field
+		uint32_t rawScore = (uint32_t)((data >> 33) & 0x7FFFFFu);
+		if (rawScore & 0x400000u) rawScore |= 0xFF800000u; // sign-extend 23-bit field
 		*score = (int)rawScore;
 	}
 
-	void Search::initHashTable(int mb) {
-		int hashSize = 0x100000 * mb;
-		hashEntries = hashSize / sizeof(HashEntry);
+	static inline uint8_t hashDataGeneration(uint64_t data) {
+		return (uint8_t)(data >> 56);
+	}
 
+	static inline HashBucket* hashBucketFor(U64 hashKey) {
+		// Multiply-high maps the key onto [0, hashBuckets) without a 64-bit division
+		return &Search::hashTable[(size_t)(((unsigned __int128)hashKey * Search::hashBuckets) >> 64)];
+	}
+
+	void Search::freeHashTable() {
+		delete[] hashTable;
+		hashTable = NULL;
+		hashBuckets = 0;
+	}
+
+	void Search::initHashTable(int mb) {
 		if (hashTable != NULL) {
 			printf("info string Clearing hash memory\n");
-			free(hashTable);
+			freeHashTable();
 		}
 
-		hashTable = (HashEntry*)malloc(hashEntries * sizeof(HashEntry));
+		// size_t math, an int byte count overflows from 2048 MB up
+		size_t hashSize = (size_t)mb * 0x100000;
+		hashBuckets = hashSize / sizeof(HashBucket);
 
-		totalEntries = mb * 1024 * 1024 / sizeof(HashEntry);
-		usedEntries = 0;
+		hashTable = new (std::nothrow) HashBucket[hashBuckets];
 
 		if (hashTable == NULL) {
+			hashBuckets = 0;
+			if (mb <= 1) {
+				printf("info string Couldnt allocate memory for hash table\n");
+				exit(EXIT_FAILURE);
+			}
 			printf("info string Couldnt allocate memory for hash table, trying %dMB\n", mb / 2);
 			initHashTable(mb / 2);
 		} else {
 			clearHashTable();
-			printf("info string Hash table is initialized with %d entries\n", hashEntries);
+			printf("info string Hash table is initialized with %llu entries\n", (unsigned long long)(hashBuckets * TT_BUCKET_SIZE));
 		}
 	}
 
 	static HASHE* readHashEntry(int alpha, int beta, int* bestMove, int* ttEval, int* ttFlag, int* ttDepth, int depth, Position& pos, bool* hit, Threads::ThreadData* threadData) {
 
-		HASHE* hashEntry = &Search::hashTable[pos.hashKey % Search::hashEntries];
+		HashBucket* bucket = hashBucketFor(pos.hashKey);
 		*hit = false;
 
-		// Lockless hashing, torn combination of old/new fails reconstruction
-		uint64_t data = hashEntry->data.load(std::memory_order_relaxed);
-		uint64_t storedKeyXor = hashEntry->keyXorData.load(std::memory_order_relaxed);
+		for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+			HASHE* hashEntry = &bucket->entries[i];
 
-		if ((storedKeyXor ^ data) != pos.hashKey) return nullptr;
+			// Lockless hashing, torn combination of old/new fails reconstruction
+			uint64_t data = hashEntry->data.load(std::memory_order_relaxed);
+			uint64_t storedKeyXor = hashEntry->keyXorData.load(std::memory_order_relaxed);
 
-		int storedBestMove, storedDepth, storedFlag, storedScore;
-		unpackHashData(data, &storedBestMove, &storedDepth, &storedFlag, &storedScore);
+			if ((storedKeyXor ^ data) != pos.hashKey) continue;
 
-		if (storedDepth >= depth) {
-			*bestMove = storedBestMove;
-
-			*ttEval = storedScore;
-			*ttFlag = storedFlag;
-			*ttDepth = storedDepth;
-
-			int score = storedScore;
-			if (score < -MATE_SCORE) score += threadData->ply;
-			if (score > MATE_SCORE) score -= threadData->ply;
-
-			if ((storedFlag == hashfEXACT) ||
-				(storedFlag == hashfALPHA && score <= alpha) ||
-				(storedFlag == hashfBETA && score >= beta)) {
-				*hit = true;
-				return hashEntry;
+			// Still useful in this search, so stamp it with the current generation to keep it from aging out
+			if (hashDataGeneration(data) != Search::hashGeneration) {
+				data = (data & 0x00FFFFFFFFFFFFFFull) | ((uint64_t)Search::hashGeneration << 56);
+				hashEntry->data.store(data, std::memory_order_relaxed);
+				hashEntry->keyXorData.store(pos.hashKey ^ data, std::memory_order_relaxed);
 			}
-		} else {
-			*bestMove = storedBestMove;
+
+			int storedBestMove, storedDepth, storedFlag, storedScore;
+			unpackHashData(data, &storedBestMove, &storedDepth, &storedFlag, &storedScore);
+
+			if (storedDepth >= depth) {
+				*bestMove = storedBestMove;
+
+				int score = storedScore;
+				if (score < -MATE_SCORE) score += threadData->ply;
+				if (score > MATE_SCORE) score -= threadData->ply;
+
+				*ttEval = score;
+				*ttFlag = storedFlag;
+				*ttDepth = storedDepth;
+
+				if ((storedFlag == hashfEXACT) ||
+					(storedFlag == hashfALPHA && score <= alpha) ||
+					(storedFlag == hashfBETA && score >= beta)) {
+					*hit = true;
+
+					return hashEntry;
+				}
+			} else {
+				*bestMove = storedBestMove;
+			}
+
+			return nullptr;
 		}
+
 		return nullptr;
 	}
 
 	static void writeHashEntry(int score, int bestMove, int depth, int hashFlag, Position& pos, Threads::ThreadData* threadData) {
-		HASHE* hashEntry = &Search::hashTable[pos.hashKey % Search::hashEntries];
+		HashBucket* bucket = hashBucketFor(pos.hashKey);
+		const uint8_t generation = Search::hashGeneration;
 
 		int adjustedScore = score;
 		if (adjustedScore < -MATE_SCORE) adjustedScore -= threadData->ply;
 		if (adjustedScore > MATE_SCORE) adjustedScore += threadData->ply;
 
-		uint64_t oldData = hashEntry->data.load(std::memory_order_relaxed);
-		uint64_t oldKeyXor = hashEntry->keyXorData.load(std::memory_order_relaxed);
-		bool sameKey = (oldKeyXor ^ oldData) == pos.hashKey;
-		int oldDepth = 0;
-		if (sameKey) {
-			int unusedMove, unusedFlag, unusedScore;
-			unpackHashData(oldData, &unusedMove, &oldDepth, &unusedFlag, &unusedScore);
-		}
+		HASHE* replace = &bucket->entries[0];
+		uint64_t replaceData = 0;
+		bool sameKey = false;
+		int worstValue = INT_MAX;
 
-		if (!sameKey || depth >= oldDepth) {
-			uint64_t newData = packHashData(bestMove, depth, hashFlag, adjustedScore);
-			hashEntry->data.store(newData, std::memory_order_relaxed);
-			hashEntry->keyXorData.store(pos.hashKey ^ newData, std::memory_order_relaxed);
-		}
-	}
+		for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+			HASHE* hashEntry = &bucket->entries[i];
+			uint64_t data = hashEntry->data.load(std::memory_order_relaxed);
+			uint64_t storedKeyXor = hashEntry->keyXorData.load(std::memory_order_relaxed);
 
-	double hashFull() {
-		// Sample a portion of the hash table to estimate usage
-		int sampleSize = std::min(1000, Search::hashEntries);
-		int used = 0;
-		
-		for (int i = 0; i < sampleSize; i++) {
-			if (Search::hashTable[i].data.load(std::memory_order_relaxed) != 0 ||
-				Search::hashTable[i].keyXorData.load(std::memory_order_relaxed) != 0) {
-				used++;
+			if ((storedKeyXor ^ data) == pos.hashKey) {
+				replace = hashEntry;
+				replaceData = data;
+				sameKey = true;
+				break;
+			}
+
+			int value;
+			if (data == 0 && storedKeyXor == 0) {
+				value = INT_MIN;
+			} else {
+				int storedDepth = (int)((data >> 24) & 0x7Fu);
+				int age = (uint8_t)(generation - hashDataGeneration(data));
+				value = storedDepth - 8 * age;
+			}
+
+			if (value < worstValue) {
+				worstValue = value;
+				replace = hashEntry;
 			}
 		}
-		
-		return 1000.0 * used / sampleSize;
+
+		if (sameKey) {
+			int oldMove, oldDepth, oldFlag, oldScore;
+			unpackHashData(replaceData, &oldMove, &oldDepth, &oldFlag, &oldScore);
+
+			bool stale = hashDataGeneration(replaceData) != generation;
+			if (hashFlag != hashfEXACT && !stale && depth + 4 <= oldDepth) return;
+
+			// A fail-low has no best move of its own, keep the old one for move ordering
+			if (bestMove == 0) bestMove = oldMove;
+		}
+
+		uint64_t newData = packHashData(bestMove, depth, hashFlag, adjustedScore, generation);
+		replace->data.store(newData, std::memory_order_relaxed);
+		replace->keyXorData.store(pos.hashKey ^ newData, std::memory_order_relaxed);
+	}
+
+	int hashFull() {
+		// Sample a portion of the hash table to estimate usage
+		size_t sampleBuckets = std::min((size_t)(1000 / TT_BUCKET_SIZE), Search::hashBuckets);
+		int used = 0;
+
+		for (size_t b = 0; b < sampleBuckets; b++) {
+			for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+				uint64_t data = Search::hashTable[b].entries[i].data.load(std::memory_order_relaxed);
+				uint64_t storedKeyXor = Search::hashTable[b].entries[i].keyXorData.load(std::memory_order_relaxed);
+				if ((data != 0 || storedKeyXor != 0) && hashDataGeneration(data) == Search::hashGeneration) {
+					used++;
+				}
+			}
+		}
+
+		return (int)(1000 * used / (sampleBuckets * TT_BUCKET_SIZE));
 	}
 
 	static void enablePVScoring(Movegen::MoveList* movelist, Threads::ThreadData* threadData) {
@@ -194,16 +267,6 @@ namespace Sloth {
 		return 0;
 	}
 
-	static bool isEndgame(Position& pos) {
-		int pawnMaterial = Bitboards::countBits(pos.bitboards[Piece::P] | pos.bitboards[Piece::p]) * 100;
-		int knightMaterial = Bitboards::countBits(pos.bitboards[Piece::N] | pos.bitboards[Piece::n]) * 320;
-		int bishopMaterial = Bitboards::countBits(pos.bitboards[Piece::B] | pos.bitboards[Piece::b]) * 320;
-		int rookMaterial = Bitboards::countBits(pos.bitboards[Piece::R] | pos.bitboards[Piece::r]) * 500;
-		int queenMaterial = Bitboards::countBits(pos.bitboards[Piece::Q] | pos.bitboards[Piece::q]) * 950;
-
-		return ((pawnMaterial + knightMaterial + bishopMaterial + rookMaterial + queenMaterial) < 2600);
-	}
-
 	static bool hasNonPawnMaterial(Position& pos) {
 		U64 whitePieces = pos.bitboards[Piece::N] | pos.bitboards[Piece::B] | pos.bitboards[Piece::R] | pos.bitboards[Piece::Q];
 		U64 blackPieces = pos.bitboards[Piece::n] | pos.bitboards[Piece::b] | pos.bitboards[Piece::r] | pos.bitboards[Piece::q];
@@ -211,11 +274,8 @@ namespace Sloth {
 		return pos.sideToMove == Colors::white ? whitePieces != 0ULL : blackPieces != 0ULL;
 	}
 
-	static int contemptFactor(Position& pos) {
-		if (isEndgame(pos))
-			return 0;
-		else
-			return pos.sideToMove == Colors::white ? -Search::contempt : Search::contempt;
+	static int drawScore(Position& pos, Threads::ThreadData* threadData) {
+		return pos.sideToMove == threadData->rootSide ? -Search::contempt : Search::contempt;
 	}
 
 	static U64 considerXrays(int sq, U64 occ, Position& pos) {
@@ -322,11 +382,18 @@ namespace Sloth {
 		return gain[0];
 	}
 
+	// Quiets land between killers and bad captures
+	constexpr int PV_MOVE_SCORE      =  2000000;
+	constexpr int GOOD_CAPTURE_SCORE =  1000000;
+	constexpr int KILLER1_SCORE      =   900000;
+	constexpr int KILLER2_SCORE      =   800000;
+	constexpr int BAD_CAPTURE_SCORE  = -1000000;
+
 	int scoreMove(int move, Position& pos, Threads::ThreadData* threadData) {
 		// TT move gets highest priority
 		if (threadData->scorePV && threadData->pvTable[0][threadData->ply] == move) {
 			threadData->scorePV = false;
-			return 30000;
+			return PV_MOVE_SCORE;
 		}
 		
 		if (getMoveCapture(move)) {
@@ -347,18 +414,18 @@ namespace Sloth {
 			int seeScore = see(move, pos);
 
 			if (seeScore < 0) {
-				return captureScore + seeScore;
+				return BAD_CAPTURE_SCORE + captureScore + seeScore;
 			}
 
-			return 10000 + captureScore + seeScore / CaptureSeeDivisor;
+			return GOOD_CAPTURE_SCORE + captureScore + seeScore / CaptureSeeDivisor;
 		}
 
 		// Killer moves with ply-based aging
 		if (threadData->killerMoves[0][threadData->ply] == move) {
-			return 9000 - threadData->ply;
+			return KILLER1_SCORE - threadData->ply;
 		}
 		if (threadData->killerMoves[1][threadData->ply] == move) {
-			return 8000 - threadData->ply;
+			return KILLER2_SCORE - threadData->ply;
 		}
 
 		int piece = getMovePiece(move);
@@ -375,7 +442,7 @@ namespace Sloth {
 
 		for (int i = 0; i < moveList->count; i++) {
 			if (bestMove == moveList->moves[i]) {
-				moveScores[i] = 30000;
+				moveScores[i] = PV_MOVE_SCORE;
 			} else {
 				moveScores[i] = scoreMove(moveList->moves[i], pos, threadData);
 			}
@@ -440,7 +507,6 @@ namespace Sloth {
 			threadData
 		);
 
-		// TODO: run mass test on this pvnode stuff.
 		if (!pvNode && ttDepth >= 0 && ttEval != EVAL_UNKNOWN && ((ttFlag == hashfALPHA && ttEval <= alpha) || (ttFlag == hashfBETA && ttEval >= beta) || (ttFlag == hashfEXACT))) {
 			return ttEval;
 		}
@@ -451,19 +517,29 @@ namespace Sloth {
 
 		if (threadData->ply > MAX_PLY - 1) return Eval::evaluate(pos);
 
-		int eval = Eval::evaluate(pos);
+		int kingSq = Bitboards::getLs1bIndex(pos.bitboards[(pos.sideToMove == Colors::white) ? Piece::K : Piece::k]);
+		bool inCheck = pos.isSquareAttacked(kingSq, pos.sideToMove ^ 1);
 
-		if (eval >= beta) return beta;
-		if (eval > alpha) alpha = eval;
+		// Standing pat is illegal in check: every evasion is searched, and having none is mate
+		int eval = -MATE_VALUE + threadData->ply;
+
+		if (!inCheck) {
+			eval = Eval::evaluate(pos);
+
+			if (eval >= beta) return beta;
+			if (eval > alpha) alpha = eval;
+		}
 
 		Movegen::MoveList moveList[1];
-		Movegen::generateMoves(pos, moveList, true);
+		Movegen::generateMoves(pos, moveList, !inCheck);
 		sortMoves(moveList, 0, pos, threadData);
+
+		int legalMoves = 0;
 
 		for (int c = 0; c < moveList->count; c++) {
 			int move = moveList->moves[c];
 
-			if (see(move, pos) < 0) {
+			if (!inCheck && see(move, pos) < 0) {
 				continue;
 			}
 
@@ -472,11 +548,13 @@ namespace Sloth {
 			pos.repetitionIndex++;
 			pos.repetitionTable[pos.repetitionIndex] = pos.hashKey;
 
-			if (pos.makeMove(pos, move, captures) == 0) {
+			if (pos.makeMove(pos, move, inCheck ? allMoves : captures) == 0) {
 				threadData->ply--;
 				pos.repetitionIndex--;
 				continue;
 			}
+
+			legalMoves++;
 
 			int score = -quiescence(-beta, -alpha, depth, pos, threadData);
 			threadData->ply--;
@@ -485,8 +563,16 @@ namespace Sloth {
 
 			if (pos.time.stopped == true || Threads::stopFlag) return 0;
 
-			if (score > alpha) {
-				alpha = score;
+			if (score > eval) {
+				bestMove = move;
+
+				if (score > alpha) {
+					alpha = score;
+
+					// pv update
+					threadData->pvTable[threadData->ply][threadData->ply] = move;
+					threadData->pvLength[threadData->ply] = threadData->ply + 1;
+				}
 
 				if (score >= beta) {
 					return beta;
@@ -494,29 +580,26 @@ namespace Sloth {
 			}
 		}
 
+		if (inCheck && legalMoves == 0) return -MATE_VALUE + threadData->ply;
+
 		return alpha;
+	}
+
+	// Gravity update
+	static void applyHistoryBonus(int* entry, int bonus) {
+		bonus = clamp(bonus, -HISTORY_MAX, HISTORY_MAX);
+		*entry += bonus - *entry * abs(bonus) / HISTORY_MAX;
+	}
+
+	static int historyBonus(int depth, bool good) {
+		int bonus = clamp(HistBonusMul * depth - HistBonusSub, 0, HistBonusMax);
+		return good ? bonus : -bonus / HistoryMalusDivisor;
 	}
 
 	void updateHistory(int move, int depth, bool good, Threads::ThreadData* td) {
 		if (getMoveCapture(move)) return;
 
-		int piece = getMovePiece(move);
-		int target = getMoveTarget(move);
-
-		int bonus = depth * depth;
-		if (good) {
-			td->historyMoves[piece][target] += bonus;
-		} else {
-			td->historyMoves[piece][target] -= bonus / HistoryMalusDivisor;
-		}
-
-		if (abs(td->historyMoves[piece][target]) > HistoryGravityThreshold) {
-			for (int i = 0; i < 12; i++) {
-				for (int j = 0; j < 64; j++) {
-					td->historyMoves[i][j] /= 2;
-				}
-			}
-		}
+		applyHistoryBonus(&td->historyMoves[getMovePiece(move)][getMoveTarget(move)], historyBonus(depth, good));
 	}
 
 	static int continuationHistoryScore(int piece, int target, Threads::ThreadData* td) {
@@ -531,6 +614,17 @@ namespace Sloth {
 		return td->continuationHistory[Threads::contHistIndex(prevPiece, prevTarget, piece, target)];
 	}
 
+	static int madeQuietHistory(int move, Threads::ThreadData* td) {
+		int piece = getMovePiece(move);
+		int target = getMoveTarget(move);
+		int score = td->historyMoves[piece][target];
+
+		int prevMove = td->ss[td->ply - 1].currentMove;
+		if (prevMove) score += td->continuationHistory[Threads::contHistIndex(getMovePiece(prevMove), getMoveTarget(prevMove), piece, target)];
+
+		return score;
+	}
+
 	static void updateContinuationHistory(int move, int depth, bool good, Threads::ThreadData* td) {
 		if (getMoveCapture(move)) return;
 		if (td->ply <= 0) return;
@@ -543,22 +637,7 @@ namespace Sloth {
 		int piece = getMovePiece(move);
 		int target = getMoveTarget(move);
 
-		int* entry = &td->continuationHistory[Threads::contHistIndex(prevPiece, prevTarget, piece, target)];
-		int bonus = depth * depth;
-
-		if (good) {
-			*entry += bonus;
-		} else {
-			*entry -= bonus / HistoryMalusDivisor;
-		}
-
-		if (abs(*entry) > HistoryGravityThreshold) {
-			for (int p = 0; p < 12; p++) {
-				for (int t = 0; t < 64; t++) {
-					td->continuationHistory[Threads::contHistIndex(prevPiece, prevTarget, p, t)] /= 2;
-				}
-			}
-		}
+		applyHistoryBonus(&td->continuationHistory[Threads::contHistIndex(prevPiece, prevTarget, piece, target)], historyBonus(depth, good));
 	}
 
 	static void updateQuietStats(int move, int depth, bool good, Threads::ThreadData* td) {
@@ -573,25 +652,17 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
     
     if (moveCount < LmrMinMoveCount || depth < LmrMinDepth) return 0;
     if (getMoveCapture(move) || getMovePromotion(move)) return 0;
-    if (move == threadData->killerMoves[0][threadData->ply] ||
-        move == threadData->killerMoves[1][threadData->ply]) return 0;
+    // called after the move is made, so this node's killers are one ply up
+    if (move == threadData->killerMoves[0][threadData->ply - 1] ||
+        move == threadData->killerMoves[1][threadData->ply - 1]) return 0;
 
     int R = std::max(1, (int)(LmrBase100 / 100.0 + log(depth) * log(moveCount) / (LmrDivisor100 / 100.0)));
 
     // Adjust based on node type
     if (pvNode) R = std::max(1, R - LmrPvReduction);
 
-    // Reduce less if position is improving
-    //if (!improving) R++;
-
-    // History-based adjustments
-    int piece = getMovePiece(move);
-    int target = getMoveTarget(move);
-    int historyScore = threadData->historyMoves[piece][target];
-
-    // Reduce more for moves with bad history
-    if (historyScore < -LmrHistoryThreshold) R++;
-    if (historyScore > LmrHistoryThreshold) R = std::max(1, R - 1);
+    // Reduce good-history moves less, bad-history moves more
+    R = std::max(1, R - madeQuietHistory(move, threadData) / LmrHistoryDivisor);
 
     R = std::min(R, depth - 1);
 
@@ -599,24 +670,30 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 }
 
 	int Search::negamax(int alpha, int beta, int depth, bool cutnode, Position& pos, Threads::ThreadData* threadData) {
+
 		if (threadData->ply > threadData->maxPly) threadData->maxPly = threadData->ply;
 
 		SearchStack* currentSS = &threadData->ss[threadData->ply];
 		
 		threadData->pvLength[threadData->ply] = threadData->ply; // inits the PV length
 
-		// less aggressive history/killer decay once time is getting short
-		if (pos.time.getTimeMs() - pos.time.startTime < 5000)
-			threadData->agingFactor = HistAgingLowTimePermille / 1000.0;
-
 		int score = 0;
-		//int bestMove = 0;
 		int hashFlag = hashfALPHA;
 
 		bool pvNode = beta - alpha > 1;
 		bool isRoot = (threadData->ply == 0);
 
-		if (threadData->ply && (isRepetition(pos, threadData) || pos.fifty >= 100)) return 0; // draw score, repetition has occured
+		if (threadData->ply && (isRepetition(pos, threadData) || pos.fifty >= 100)) return drawScore(pos, threadData); // repetition or fifty-move draw
+
+		// Mate distance pruning
+		if (!isRoot) {
+			alpha = std::max(alpha, -MATE_VALUE + threadData->ply);
+			beta = std::min(beta, MATE_VALUE - threadData->ply - 1);
+			if (alpha >= beta) return alpha;
+		}
+
+		int kingCheck = pos.isSquareAttacked((pos.sideToMove == Colors::white) ? Bitboards::getLs1bIndex(pos.bitboards[Piece::K]) : Bitboards::getLs1bIndex(pos.bitboards[Piece::k]), pos.sideToMove ^ 1);
+		if (kingCheck) depth++;
 
 		int bestMove    = 0;
 		int ttEval      = EVAL_UNKNOWN;
@@ -643,20 +720,6 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 
 		if ((threadData->nodes & 2047) == 0) pos.time.communicate();
 
-		// age
-		if ((threadData->nodes & 1000) == 0) {
-			for (int i = 0; i < MAX_PLY; i++) {
-				threadData->killerMoves[0][i] *= threadData->agingFactor;
-				threadData->killerMoves[1][i] *= threadData->agingFactor;
-			}
-
-			for (int i = 0; i < 12; i++) {
-				for (int j = 0; j < 64; j++) {
-					threadData->historyMoves[i][j] *= threadData->agingFactor;
-				}
-			}
-		}
-
 		if (isRoot) {
 			lastCurrmoveOutput = pos.time.startTime - CURRMOVE_INTERVAL;
 		}
@@ -668,9 +731,6 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 		if (threadData->ply > MAX_PLY - 1) return Eval::evaluate(pos);
 
 		if (!Threads::tryVisitNode(threadData)) return 0;
-
-		int kingCheck = pos.isSquareAttacked((pos.sideToMove == Colors::white) ? Bitboards::getLs1bIndex(pos.bitboards[Piece::K]) : Bitboards::getLs1bIndex(pos.bitboards[Piece::k]), pos.sideToMove ^ 1);
-		if (kingCheck) depth++; // If the king is in check, then we increase Search::ply depth by one to prevent immediately getting mated
 
 		int legalMoves = 0;
 		int staticEval = Eval::evaluate(pos);
@@ -703,24 +763,12 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 			return staticEval;
 		}
 
-		// TODO:
-		/*// mate distance pruning
-		int matingValue = MATE_VALUE - threadData->ply;
-		if (matingValue < beta) {
-			beta = matingValue;
-			if (alpha >= matingValue) return matingValue;
-		}
-		int matingValueAlpha = -MATE_VALUE + threadData->ply;
-		if (matingValueAlpha > alpha) {
-			alpha = matingValueAlpha;
-			if (beta <= matingValueAlpha) return matingValueAlpha;
-		}*/
-
 		// null move pruning
-		if (depth >= NmpMinDepth && !kingCheck && threadData->ply && hasNonPawnMaterial(pos)) {
+		if (depth >= NmpMinDepth && !kingCheck && threadData->ply && hasNonPawnMaterial(pos) && abs(beta) < MATE_SCORE) {
 			copyBoard(pos);
 
 			threadData->ply++;
+			threadData->ss[threadData->ply].currentMove = 0; // no previous move for continuation history
 
 			pos.repetitionIndex++;
 			pos.repetitionTable[pos.repetitionIndex] = pos.hashKey;
@@ -771,7 +819,7 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 		// ProbCut
 		int probCutBeta = beta + ProbCutMargin;
 
-		if (depth >= ProbCutMinDepth && !pvNode && !kingCheck && threadData->ply > 0 && !(ttDepth >= depth - ProbCutTTDepthMargin && ttEval != EVAL_UNKNOWN && ttEval < probCutBeta)) {
+		if (depth >= ProbCutMinDepth && !pvNode && !kingCheck && threadData->ply > 0 && abs(beta) < MATE_SCORE && !(ttDepth >= depth - ProbCutTTDepthMargin && ttEval != EVAL_UNKNOWN && ttEval < probCutBeta)) {
 			int reducedDepth = std::max(depth - ProbCutReduction, 0);
 
 			Movegen::MoveList captureList[1];
@@ -801,6 +849,8 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 
 					continue; // skip to next move
 				}
+
+				threadData->ss[threadData->ply].currentMove = captureList->moves[c];
 
 				score = -quiescence(-probCutBeta, -probCutBeta + 1, depth, pos, threadData);
 
@@ -832,7 +882,7 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 
 		int movesSearched = 0;
 
-		// Quiets tried at this node so far, in case one of them or a later one causes a beta cutoff
+		// Quiets searched at this node so far, in case one of them or a later one causes a beta cutoff
 		int triedQuiets[256];
 		int triedQuietsCount = 0;
 
@@ -855,9 +905,7 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 
 			threadData->ss[threadData->ply].currentMove = move;
 
-			if (!getMoveCapture(move) && triedQuietsCount < 256) {
-				triedQuiets[triedQuietsCount++] = move;
-			}
+			bool givesCheck = pos.isSquareAttacked(Bitboards::getLs1bIndex(pos.bitboards[(pos.sideToMove == Colors::white) ? Piece::K : Piece::k]), pos.sideToMove ^ 1);
 
 			if (isRoot && threadData->threadId == 0) {
 				reportedCurrMove = false;
@@ -888,9 +936,9 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 				
 				// **FUTILITY PRUNING**
 				if (canFutilityPrune && (legalMoves > 1)) {
-					if (!pos.isSquareAttacked(Bitboards::getLs1bIndex(pos.bitboards[(pos.sideToMove == Colors::white) ? Piece::K : Piece::k]), pos.sideToMove ^ 1)
-						&& (threadData->killerMoves[0][threadData->ply] != move)
-						&& (threadData->killerMoves[1][threadData->ply] != move)
+					if (!givesCheck
+						&& (threadData->killerMoves[0][threadData->ply - 1] != move)
+						&& (threadData->killerMoves[1][threadData->ply - 1] != move)
 						&& (getMovePiece(move) != Piece::P && getMovePiece(move) != Piece::p)
 						&& !getMovePromotion(move)
 						&& !getMoveCastling(move) 
@@ -901,16 +949,15 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 				}
 				
 				// **LATE MOVE PRUNING**
-				if (!skipMove && threadData->ply && !pvNode && depth <= LmpMaxDepth && !kingCheck &&
+				if (!skipMove && threadData->ply && !pvNode && depth <= LmpMaxDepth && !kingCheck && !givesCheck &&
 					!getMoveCapture(move) && (legalMoves > LmpBase + LmpMult * depth * depth)) {
 					skipMove = true;
 				}
 
 				// **HISTORY PRUNING**
-				if (!skipMove && depth <= HistoryPruningMaxDepth && !getMoveCapture(move) && !getMovePromotion(move) &&
-					move != threadData->killerMoves[0][threadData->ply] && move != threadData->killerMoves[1][threadData->ply]) {
-					int historyScore = threadData->historyMoves[getMovePiece(move)][getMoveTarget(move)];
-					if (historyScore < -HistoryPruningMargin * depth) {
+				if (!skipMove && depth <= HistoryPruningMaxDepth && !givesCheck && !getMoveCapture(move) && !getMovePromotion(move) &&
+					move != threadData->killerMoves[0][threadData->ply - 1] && move != threadData->killerMoves[1][threadData->ply - 1]) {
+					if (madeQuietHistory(move, threadData) < -HistoryPruningMargin * depth) {
 						skipMove = true;
 					}
 				}
@@ -924,6 +971,7 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 				
 				// **LATE MOVE REDUCTION (LMR)**
 				int reduction = calculateReduction(depth, movesSearched, pvNode, improving, move, pos, threadData);
+				if (givesCheck) reduction = std::max(0, reduction - 1);
 				bool doLMR = false;
 				
 				if (movesSearched > 1 && depth >= LmrMinDepth && !kingCheck && !getMoveCapture(move)  && !getMovePromotion(move)) {
@@ -963,15 +1011,17 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 
 			movesSearched++;
 
+			// Searched quiets are penalized on cutoff, penalzing pruned ones would push history down
+			if (!getMoveCapture(move) && triedQuietsCount < 256) {
+				triedQuiets[triedQuietsCount++] = move;
+			}
+
 			// if better move is found
 			if (score > alpha) {
 				// switch hash flag
 				hashFlag = hashfEXACT;
 				bestMove = move;
 
-				if (!getMoveCapture(move)) {
-					threadData->historyMoves[getMovePiece(move)][getMoveTarget(move)] += 1 << depth;
-				}
 				alpha = score; // PV node
 
 				// TODO: see if only the main thread has to update PV
@@ -1014,7 +1064,7 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 				return -MATE_VALUE + threadData->ply;
 			}
 			else {
-				return contemptFactor(pos);
+				return drawScore(pos, threadData); // stalemate
 			}
 		}
 
@@ -1026,7 +1076,6 @@ int calculateReduction(int depth, int moveCount, bool pvNode, bool improving,
 	void Search::iterativeDeepen(Threads::ThreadData* threadData) {
 		threadData->score = 0;
 		threadData->nodes = 0;
-		threadData->agingFactor = HistAgingFactorPermille / 1000.0;
 
 		threadData->followPV = false;
 		threadData->scorePV = false;

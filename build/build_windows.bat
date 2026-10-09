@@ -1,9 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 set CXX=g++
-set PY=python
+set PY=py
 
 set ARCH_ARG=
+set NN_DEFS=
+set NN_BUCKETS=8
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -11,7 +13,30 @@ if /I "%~1"=="EVALFILE" (
     shift
     goto take_evalfile_value
 )
+if /I "%~1"=="BUCKETS" (
+    set "NN_BUCKETS=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="HIDDEN" (
+    set "NN_DEFS=!NN_DEFS! -DNN_HIDDEN=%~2"
+    shift
+    shift
+    goto parse_args
+)
 set "ARG=%~1"
+
+if /I "!ARG:~0,8!"=="BUCKETS=" (
+    set "NN_BUCKETS=!ARG:~8!"
+    shift
+    goto parse_args
+)
+if /I "!ARG:~0,7!"=="HIDDEN=" (
+    set "NN_DEFS=!NN_DEFS! -DNN_HIDDEN=!ARG:~7!"
+    shift
+    goto parse_args
+)
 if /I "!ARG:~0,9!"=="EVALFILE=" (
     set "EVALFILE=!ARG:~9!"
     shift
@@ -26,6 +51,7 @@ set "EVALFILE=%~1"
 shift
 goto parse_args
 :args_done
+set "NN_DEFS=!NN_DEFS! -DNN_OUTPUT_BUCKETS=!NN_BUCKETS!"
 
 if "%ARCH_ARG%"=="" goto all
 if /I "%ARCH_ARG%"=="SSE3" goto sse3
@@ -38,7 +64,7 @@ goto end
 
 :sse3
 if exist "sloth_sse3.exe" del "sloth_sse3.exe"
-call :build sse3 "-msse3 -mssse3 -march=sandybridge -mtune=sandybridge"
+call :build sse3 "-msse3 -mssse3 -march=core2 -mtune=sandybridge"
 goto end
 
 :sse4
@@ -62,7 +88,7 @@ call :build avx512 "-march=skylake-avx512 -mavx512f -mavx512cd -mavx512bw -mavx5
 goto end
 
 :all
-call :build sse3 "-msse3 -mssse3 -march=sandybridge -mtune=sandybridge"
+call :build sse3 "-msse3 -mssse3 -march=core2 -mtune=sandybridge"
 call :build sse4 "-msse4.1 -msse4.2 -march=sandybridge -mtune=sandybridge -mssse3 -mno-avx"
 call :build bmi2 "-march=haswell -msse4.1 -msse4.2 -mbmi -mfma -mavx2 -mbmi2 -mavx"
 call :build avx2 "-march=haswell -mavx2 -mfma -mtune=haswell -DNN_WITH_AVX2"
@@ -85,15 +111,15 @@ if not "%EVALFILE%"=="" (
     set EXTRA_FLAGS=-DEVALFILE_EMBEDDED
 )
 
-%CXX% -o sloth ../src/glob.cpp ^
+%CXX% -o sloth.exe ../src/glob.cpp ^
     -Ofast -flto -ftree-vectorize -funroll-loops -w ^
     -static -DNDEBUG -finline-functions -pipe -std=c++23 -ffast-math ^
     -fno-rtti -fstrict-aliasing -fomit-frame-pointer ^
-    %ARCH_FLAGS% %EXTRA_FLAGS%
+    %ARCH_FLAGS% %EXTRA_FLAGS% %NN_DEFS%
 
 rename sloth.exe sloth_%~1.exe
 goto :eof
 
 :end
 echo Build process completed
-exit
+exit /b

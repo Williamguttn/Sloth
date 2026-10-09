@@ -70,7 +70,8 @@ namespace Sloth {
 	int Position::makeMove(Position& pos, int move, int moveFlag) {
 		// quiet
 		if (moveFlag == MoveType::allMoves) {
-			copyBoard(pos);
+			// Accumulator not updated before legality check
+			copyBoardNoAcc(pos);
 
 			int sourceSquare = getMoveSource(move);
 			int targetSquare = getMoveTarget(move);
@@ -220,6 +221,18 @@ namespace Sloth {
 			pos.occupancies[Colors::both] |= pos.occupancies[Colors::white];
 			pos.occupancies[Colors::both] |= pos.occupancies[Colors::black];
 
+			int colorIdx = (pos.sideToMove == Colors::white ? 0 : 1);
+
+			pos.sideToMove ^= 1;
+			hashKey ^= Zobrist::sideKey;
+
+			// make sure that king hasnt been exposed into a check
+			if (isSquareAttacked((pos.sideToMove == Colors::white) ? Bitboards::getLs1bIndex(pos.bitboards[Piece::k]) : Bitboards::getLs1bIndex(pos.bitboards[Piece::K]), pos.sideToMove)) {
+				takeBackNoAcc(pos);
+
+				return 0;
+			}
+
 			if (castlingFlag || promotedPiece || enPassantFlag) {
 				// full rebuild with converted squares
 				nn_init_accumulator(pos.nnue_acc);
@@ -237,27 +250,13 @@ namespace Sloth {
 			}
 			else {
 
-				// Single-piece move
-				int colorIdx = (pos.sideToMove == Colors::white ? 0 : 1);
-				const int convPieceType[12] = {0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5};
 				int standard_source = sourceSquare ^ 56;
 				int standard_target = targetSquare ^ 56;
-				nn_mov_piece(pos.nnue_acc, convPieceType[piece], colorIdx, standard_source, standard_target);
 				if (captureFlag) {
-					int oppColor = colorIdx ^ 1;
-					int nnue_cap_type = capturedPieceType % 6;
-					nn_del_piece(pos.nnue_acc, nnue_cap_type, oppColor, standard_target);
+					nn_capture_piece(pos.nnue_acc, piece % 6, colorIdx, standard_source, standard_target, capturedPieceType % 6);
+				} else {
+					nn_mov_piece(pos.nnue_acc, piece % 6, colorIdx, standard_source, standard_target);
 				}
-			}
-
-			pos.sideToMove ^= 1;
-			hashKey ^= Zobrist::sideKey;
-
-			// make sure that king hasnt been exposed into a check
-			if (isSquareAttacked((pos.sideToMove == Colors::white) ? Bitboards::getLs1bIndex(pos.bitboards[Piece::k]) : Bitboards::getLs1bIndex(pos.bitboards[Piece::K]), pos.sideToMove)) {
-				takeBack(pos);
-
-				return 0;
 			}
 
 			return 1;

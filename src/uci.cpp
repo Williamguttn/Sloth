@@ -248,12 +248,12 @@ namespace Sloth {
                 pos.time.stopTime = pos.time.startTime + pos.time.time + pos.time.inc;
             }
 
-            if (depth == -1) {
-                depth = 64;
+            if (depth == -1 || depth > MAX_PLY - 1) {
+                depth = MAX_PLY - 1;
             }
 
             if (ponder) {
-                depth = 64;
+                depth = MAX_PLY - 1;
             } else {
                 //Search::clearHashTable();ddd
             }
@@ -336,7 +336,8 @@ namespace Sloth {
         setvbuf(stdin, NULL, _IONBF, 0);
         setvbuf(stdout, NULL, _IONBF, 0);
 
-        char input[2000];
+        // Long games produce long "position ... moves ..." lines (~5 chars per move)
+        static char input[65536];
         int mbHash = 0;
 
         printf("Sloth version %s\n", VERSION);
@@ -345,7 +346,7 @@ namespace Sloth {
             memset(input, 0, sizeof(input));
             fflush(stdout);
 
-            if (!fgets(input, 2000, stdin)) continue;
+            if (!fgets(input, sizeof(input), stdin)) continue;
 
             if (input[0] == '\n') continue;
 
@@ -410,6 +411,8 @@ namespace Sloth {
                 Tune::printSPSAInput();
             } else if (strncmp(input, "bench", 5) == 0) {
                 UCI::bench();
+            } else if (strncmp(input, "eval", 4) == 0) {
+                printf("eval %d\n", Eval::evaluate(game));
             }
         }
     }

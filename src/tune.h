@@ -50,9 +50,6 @@ namespace Sloth {
     extern int RazorMarginPerDepth;
     extern int RazorMaxDepth;
 
-    // ---- Internal iterative reduction ----
-    extern int IirMinDepth;
-
     // ---- ProbCut ----
     extern int ProbCutMargin;
     extern int ProbCutMinDepth;
@@ -71,10 +68,6 @@ namespace Sloth {
     extern int LmpBase;
     extern int LmpMult;
 
-    // ---- SEE pruning (quiet moves) ----
-    extern int SeePruningMargin;
-    extern int SeePruningMaxDepth;
-
     // ---- History pruning ----
     extern int HistoryPruningMargin;
     extern int HistoryPruningMaxDepth;
@@ -85,21 +78,19 @@ namespace Sloth {
     extern int LmrBase100;     // formula base, scaled by 100
     extern int LmrDivisor100;  // formula divisor, scaled by 100
     extern int LmrPvReduction;
-    extern int LmrHistoryThreshold;
+    extern int LmrHistoryDivisor;
 
     // ---- Aspiration window ----
     extern int AspirationWindow;
 
     // ---- History heuristic ----
     extern int HistoryMalusDivisor;
-    extern int HistoryGravityThreshold;
+    extern int HistBonusMul;   // history bonus = min(HistBonusMul * depth - HistBonusSub, HistBonusMax)
+    extern int HistBonusSub;
+    extern int HistBonusMax;
     extern int HistoryPlyDivisor;
     extern int CaptureAttackerDivisor;
     extern int CaptureSeeDivisor;
-
-    // ---- Killer/history aging ----
-    extern int HistAgingFactorPermille;
-    extern int HistAgingLowTimePermille;
 
 } // namespace Sloth
 

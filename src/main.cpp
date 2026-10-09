@@ -79,7 +79,7 @@ int main(int argc, char* argv[])
         #endif
     } else UCI::loop();
 end:
-    free(Search::hashTable);
+    Search::freeHashTable();
 
     return 0;
 }

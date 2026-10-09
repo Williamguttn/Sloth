@@ -58,11 +58,11 @@ namespace Sloth {
                 td.pos = pos;  
                 
                 td.score = 0;
+                td.rootSide = pos.sideToMove;
                 td.ply = 0;
                 td.maxPly = 0;
                 td.depth = 0;
                 td.nodes = 0;
-                td.agingFactor = 0.9;
                 td.followPV = false;
                 td.scorePV = false;
                 
@@ -132,6 +132,7 @@ namespace Sloth {
             WaitForSearchFinish();
 
             InitializeThreads(numThreads, pos);
+            Search::newSearchGeneration();
             nodeLimit = nodes;
             totalNodes.store(0, std::memory_order_relaxed);
 

@@ -13,30 +13,34 @@
 #include "types.h"
 
 namespace Sloth {
-	#define copyBoard(pos)                                      \
+	#define copyBoardNoAcc(pos)                                 \
 		U64  bbsCopy[12], occCopies[3];                         \
 		int  side, enPassant, castle, fifty;                    \
 		U64  hashKeyCopy = pos.hashKey;                         \
-		NN_Accumulator nnue_acc_copy;                           \
-		/* copy the accumulator out */                          \
-		memcpy(nnue_acc_copy, pos.nnue_acc, sizeof(nnue_acc_copy)); \
-		memcpy(bbsCopy,        pos.bitboards, 96);       \
-		memcpy(occCopies,      pos.occupancies, 24);     \
+		memcpy(bbsCopy,   pos.bitboards,   96);                 \
+		memcpy(occCopies, pos.occupancies, 24);                 \
 		side       = pos.sideToMove;                            \
 		enPassant  = pos.enPassant;                             \
 		castle     = pos.castle;                                \
 		fifty      = pos.fifty;
 
-	#define takeBack(pos)                                        \
-		/* restore NNUE */                                       \
-		memcpy(pos.nnue_acc, nnue_acc_copy, sizeof(nnue_acc_copy)); \
-		memcpy(pos.bitboards, bbsCopy,   96);             \
-		memcpy(pos.occupancies, occCopies, 24);           \
+	#define takeBackNoAcc(pos)                                   \
+		memcpy(pos.bitboards, bbsCopy,     96);                  \
+		memcpy(pos.occupancies, occCopies, 24);                  \
 		pos.sideToMove = side;                                   \
 		pos.enPassant  = enPassant;                              \
 		pos.castle     = castle;                                 \
 		pos.fifty      = fifty;                                  \
 		pos.hashKey    = hashKeyCopy;
+
+	#define copyBoard(pos)                                          \
+		copyBoardNoAcc(pos)                                         \
+		NN_Accumulator nnue_acc_copy;                               \
+		memcpy(nnue_acc_copy, pos.nnue_acc, sizeof(nnue_acc_copy));
+
+	#define takeBack(pos)                                           \
+		memcpy(pos.nnue_acc, nnue_acc_copy, sizeof(nnue_acc_copy)); \
+		takeBackNoAcc(pos)
 
 	class Position {
 	public:

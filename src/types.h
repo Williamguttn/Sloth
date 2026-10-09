@@ -8,7 +8,7 @@
 #include "bitboards.h"
 #pragma warning(disable: 4554)
 
-#define VERSION "2.3"
+#define VERSION "2.4"
 
 #define emptyBoard "8/8/8/8/8/8/8/8 b - - "
 #define startPosition "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -18,10 +18,9 @@
 
 #define VALUE_INFINITE 50000
 
-#define MAX_PLY 64
+#define MAX_PLY 128
 
 #define NO_HASH_ENTRY 100000
-//#define MAX_HASH 256 // max hash 128 mb
 #define MIN_HASH 16
 #define MAX_HASH 1000000
 
@@ -41,16 +40,22 @@
 typedef struct HASHE {
     std::atomic<uint64_t> keyXorData;
     std::atomic<uint64_t> data;
-    char padding[
-        CACHE_LINE_SIZE -
-        2 * sizeof(std::atomic<uint64_t>)
-    ];
 } HashEntry;
+
+// One cache line holds a bucket of 4 entries, so a probe costs a single memory fetch
+#define TT_BUCKET_SIZE 4
+
+struct alignas(CACHE_LINE_SIZE) HashBucket {
+    HashEntry entries[TT_BUCKET_SIZE];
+};
+
+static_assert(sizeof(HashBucket) == CACHE_LINE_SIZE, "a TT bucket must fill exactly one cache line");
 
 struct SearchStack {
     int ply;
     int staticEval;
     int currentMove;
+    int excludedMove; // TT move skipped while verifying a singular extension, 0 otherwise
     bool tactical;
 };
 
